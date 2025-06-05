@@ -14,7 +14,7 @@ class InteractiveDiamondViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = UIColor.secondarySystemGroupedBackground
         
         title = "Tap or drag place a hit"
         
@@ -47,7 +47,7 @@ class InteractiveDiamondViewController: UIViewController {
         NSLayoutConstraint.activate([
             heightSlider.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             heightSlider.widthAnchor.constraint(equalToConstant: view.frame.width * 0.8),
-            heightSlider.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 36)
+            heightSlider.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12)
         ])
     }
     
@@ -174,13 +174,15 @@ class TrajectoryLayer: UIView {
         let home = getHomePlatePosition()
         
         // Draw hit trajectory
-        // Shadow (flat) line
-        ctx.beginPath()
-        ctx.setStrokeColor(UIColor.black.withAlphaComponent(0.2).cgColor)
-        ctx.setLineWidth(2)
-        ctx.move(to: home)
-        ctx.addLine(to: end)
-        ctx.strokePath()
+        // Shadow (flat) line - only if trajectory exists (height > 0)
+        if height > 0.01 {
+            ctx.beginPath()
+            ctx.setStrokeColor(UIColor.black.withAlphaComponent(0.2).cgColor)
+            ctx.setLineWidth(2)
+            ctx.move(to: home)
+            ctx.addLine(to: end)
+            ctx.strokePath()
+        }
         
         // Draw 'X' marker at landing spot
         let xSize: CGFloat = 5
