@@ -1,564 +1,634 @@
-//
-//  GameViewController.swift
-//  BatStat
-//
-//  Created by Colton Swapp on 5/5/25.
-//
-
 import UIKit
-import CoreData
-
-// MARK: - PlayerStat
-struct PlayerStat {
-    let player: Player
-    let atBats: Int
-    let runs: Int
-    let hits: Int
-    let rbis: Int
-    let homeRuns: Int
-    let walks: Int
-    let strikeouts: Int
-    let average: String  // Formatted as string (e.g., ".275")
-}
 
 class GameViewController: UIViewController {
     
-    // MARK: - Properties
-    
-    private let game: GameEntity
-    private let gameManager = GameManager.shared
-    private var players: [Player] = []
-    private var playerStats: [PlayerStat] = []
-    
-    private let tableView = UITableView(frame: .zero, style: .insetGrouped)
-    
-    // Section indices
-    private enum Section: Int, CaseIterable {
-        case gameInfo = 0
-        case interactiveView = 1
-        case stats = 2
-    }
-    
-    // Define constants for layout to ensure consistency between headers and cells
-    struct StatColumnWidth {
-        static let playerName: CGFloat = 120
-        static let stats: [CGFloat] = [24, 20, 20, 25, 20, 20, 20, 40]
-        static let spacing: CGFloat = 0
-        static let leftPadding: CGFloat = 150
+    private lazy var collectionView: UICollectionView = {
+        let layout = createLayout()
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.delegate = self
+        collectionView.dataSource = self
+        collectionView.backgroundColor = .systemGroupedBackground
         
-        // Positions for each column (calculated from left edge)
-        static let positions: [CGFloat] = {
-            var positions: [CGFloat] = []
-            var currentPosition = leftPadding
-            
-            for width in stats {
-                positions.append(currentPosition)
-                currentPosition += width + spacing
-            }
-            
-            return positions
-        }()
-    }
+        // Register cells
+        collectionView.register(AtBatCell.self, forCellWithReuseIdentifier: AtBatCell.identifier)
+        collectionView.register(PlayerStatCell.self, forCellWithReuseIdentifier: PlayerStatCell.identifier)
+        collectionView.register(GameCell.self, forCellWithReuseIdentifier: GameCell.identifier)
+        collectionView.register(AtBatOutcomeCell.self, forCellWithReuseIdentifier: AtBatOutcomeCell.identifier)
+        collectionView.register(ViewAllCell.self, forCellWithReuseIdentifier: ViewAllCell.identifier)
+        collectionView.register(AtBatSectionHeader.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: AtBatSectionHeader.identifier)
+        collectionView.register(StatisticsHeaderView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: StatisticsHeaderView.identifier)
+        collectionView.register(SectionHeaderView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: SectionHeaderView.identifier)
+        collectionView.register(SectionFooterView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter, withReuseIdentifier: SectionFooterView.identifier)
+        
+        return collectionView
+    }()
     
-    // MARK: - Initialization
-    
-    init(game: GameEntity) {
-        self.game = game
-        super.init(nibName: nil, bundle: nil)
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    // MARK: - Lifecycle
+    private let playerService = PlayerService()
+    private let gameService = GameService.shared
+    private let statService = StatService.shared
+    private var currentGame: Game?
+    private var rosterPlayers: [Player] = []
+    private var pastGames: [Game] = []
+    private var recentAtBats: [Stat] = []
+    private var playerGameStats: [UUID: PlayerGameStats] = [:]
+    private var currentAtBatIndex: Int = 0
+    private var currentInning: Int = 1
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        title = game.opponentName
-        view.backgroundColor = .systemBackground
-        
+        setupUI()
         setupNavigationBar()
-        setupTableView()
-        loadPlayers()
-        generateDummyStats()
-        
-        // Register for notifications when game data changes
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleGameDataChanged),
-            name: NSNotification.Name("GameDataChanged"),
-            object: nil
-        )
+        loadData()
     }
     
-    deinit {
-        NotificationCenter.default.removeObserver(self)
+    
+    func configure(with game: Game) {
+        self.currentGame = game
+        loadData()
     }
     
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
+    private func loadData() {
+        guard let game = currentGame else { return }
         
-        // Refresh the title in case it was edited
-        title = game.opponentName
+        loadRosterPlayers()
+        loadPastGames()
+        loadRecentAtBats()
     }
     
-    // MARK: - Setup
-    
-    private func setupNavigationBar() {
-        navigationItem.largeTitleDisplayMode = .never
+    private func loadRosterPlayers() {
+        guard let game = currentGame else { return }
         
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .edit,
-            target: self,
-            action: #selector(editGame)
-        )
-    }
-    
-    private func setupTableView() {
-        view.addSubview(tableView)
-        tableView.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        
-        tableView.delegate = self
-        tableView.dataSource = self
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "PlayerCell")
-        tableView.register(StatsCell.self, forCellReuseIdentifier: "StatsCell")
-        tableView.register(UITableViewHeaderFooterView.self, forHeaderFooterViewReuseIdentifier: "Header")
-    }
-    
-    // MARK: - Data
-    
-    private func loadPlayers() {
-        players = gameManager.getPlayersForGame(game)
-        tableView.reloadData()
-    }
-    
-    private func generateDummyStats() {
-        // Create dummy stats for each player
-        playerStats = players.map { player in
-            // Generate random stats
-            let atBats = Int.random(in: 0...5)
-            let hits = atBats > 0 ? Int.random(in: 0...atBats) : 0
-            let runs = hits > 0 ? Int.random(in: 0...hits) : 0
-            let homeRuns = hits > 0 ? Int.random(in: 0...(hits > 1 ? 1 : 0)) : 0
-            let rbis = hits > 0 ? Int.random(in: 0...3) : 0
-            let walks = Int.random(in: 0...2)
-            let strikeouts = atBats - hits > 0 ? Int.random(in: 0...(atBats - hits)) : 0
-            
-            // Calculate batting average
-            let average = atBats > 0 ? String(format: ".%03d", Int(Double(hits) / Double(atBats) * 1000)) : ".000"
-            
-            return PlayerStat(
-                player: player,
-                atBats: atBats,
-                runs: runs,
-                hits: hits,
-                rbis: rbis,
-                homeRuns: homeRuns,
-                walks: walks,
-                strikeouts: strikeouts,
-                average: average
-            )
-        }
-        
-        tableView.reloadData()
-    }
-    
-    @objc private func handleGameDataChanged() {
-        // Refresh players when notification is received
-        loadPlayers()
-        generateDummyStats()
-        
-        // Update the title in case it changed
-        title = game.opponentName
-    }
-    
-    // MARK: - Actions
-    
-    @objc private func editGame() {
-        let gameDetailVC = GameDetailViewController(game: game)
-        let navController = UINavigationController(rootViewController: gameDetailVC)
-        present(navController, animated: true)
-    }
-    
-    // MARK: - Table Header Views
-    
-    private func createStatsHeaderView() -> UIView {
-        let headerView = UIView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 40))
-        headerView.backgroundColor = .systemGroupedBackground
-        
-        // Main title
-        let titleLabel = UILabel()
-        titleLabel.text = "Player Statistics".uppercased()
-        titleLabel.font = UIFont.systemFont(ofSize: 10, weight: .regular)
-        titleLabel.textColor = .secondaryLabel
-        
-        // Stats column titles
-        let statLabels = ["AB", "R", "H", "RBI", "HR", "BB", "K", "AVG"]
-        
-        // Add all labels to the header
-        headerView.addSubview(titleLabel)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            titleLabel.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -8),
-            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 16),
-        ])
-        
-        // Add stat abbreviation labels
-        for (index, title) in statLabels.enumerated() {
-            let label = UILabel()
-            label.text = title
-            label.font = UIFont.systemFont(ofSize: 10, weight: .regular)
-            label.textColor = .tertiaryLabel
-            label.textAlignment = .center
-            
-            headerView.addSubview(label)
-            label.translatesAutoresizingMaskIntoConstraints = false
-            
-            NSLayoutConstraint.activate([
-                label.centerXAnchor.constraint(equalTo: headerView.leadingAnchor, constant: StatColumnWidth.positions[index] + StatColumnWidth.stats[index]/2),
-                label.bottomAnchor.constraint(equalTo: headerView.bottomAnchor, constant: -8),
-                label.widthAnchor.constraint(equalToConstant: StatColumnWidth.stats[index])
-            ])
-        }
-        
-        return headerView
-    }
-}
-
-// MARK: - StatsCell
-class StatsCell: UITableViewCell {
-    private let playerNameLabel = UILabel()
-    
-    // Stat labels
-    private let abLabel = UILabel()
-    private let rLabel = UILabel()
-    private let hLabel = UILabel()
-    private let rbiLabel = UILabel()
-    private let hrLabel = UILabel()
-    private let bbLabel = UILabel()
-    private let kLabel = UILabel()
-    private let avgLabel = UILabel()
-    
-    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
-        super.init(style: style, reuseIdentifier: reuseIdentifier)
-        setupViews()
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func setupViews() {
-        // Player name at left
-        playerNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-        playerNameLabel.textColor = .label
-        
-        contentView.addSubview(playerNameLabel)
-        playerNameLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            playerNameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            playerNameLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            playerNameLabel.widthAnchor.constraint(equalToConstant: GameViewController.StatColumnWidth.playerName)
-        ])
-        
-        // Configure and position stat labels with absolute positioning
-        let labels = [abLabel, rLabel, hLabel, rbiLabel, hrLabel, bbLabel, kLabel, avgLabel]
-        
-        for (index, label) in labels.enumerated() {
-            label.font = UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-            label.textAlignment = .center
-            
-            contentView.addSubview(label)
-            label.translatesAutoresizingMaskIntoConstraints = false
-            
-            NSLayoutConstraint.activate([
-                label.centerXAnchor.constraint(equalTo: contentView.leadingAnchor, constant: GameViewController.StatColumnWidth.positions[index] + GameViewController.StatColumnWidth.stats[index]/2),
-                label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-                label.widthAnchor.constraint(equalToConstant: GameViewController.StatColumnWidth.stats[index])
-            ])
-        }
-        
-        // Add separator line at bottom
-        let separatorLine = UIView()
-        separatorLine.backgroundColor = .separator
-        contentView.addSubview(separatorLine)
-        separatorLine.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            separatorLine.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            separatorLine.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            separatorLine.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            separatorLine.heightAnchor.constraint(equalToConstant: 0.5)
-        ])
-        
-        // Set proper cell height
-        contentView.heightAnchor.constraint(equalToConstant: 44).isActive = true
-    }
-    
-    func configure(with stat: PlayerStat) {
-        let player = stat.player
-        playerNameLabel.text = "\(player.firstName.prefix(1)). \(player.lastName) #\(player.number)"
-        
-        abLabel.text = "\(stat.atBats)"
-        rLabel.text = "\(stat.runs)"
-        hLabel.text = "\(stat.hits)"
-        rbiLabel.text = "\(stat.rbis)"
-        hrLabel.text = "\(stat.homeRuns)"
-        bbLabel.text = "\(stat.walks)"
-        kLabel.text = "\(stat.strikeouts)"
-        avgLabel.text = stat.average
-    }
-}
-
-// MARK: - UITableViewDataSource
-
-extension GameViewController: UITableViewDataSource {
-    
-    func numberOfSections(in tableView: UITableView) -> Int {
-        return Section.allCases.count
-    }
-    
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        guard let sectionType = Section(rawValue: section) else { return 0 }
-        
-        switch sectionType {
-        case .gameInfo:
-            return 1
-        case .interactiveView:
-            return 2
-        case .stats:
-            return playerStats.count
-        }
-    }
-    
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        guard let section = Section(rawValue: indexPath.section) else {
-            return UITableViewCell()
-        }
-        
-        switch section {
-        case .gameInfo:
-            // Game info section
-            let cell = tableView.dequeueReusableCell(withIdentifier: "PlayerCell", for: indexPath)
-            var content = cell.defaultContentConfiguration()
-            
-            if let date = game.date {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                content.text = "Game Date"
-                content.secondaryText = formatter.string(from: date)
+        Task {
+            do {
+                Logger.debug("Loading roster players for game: \(game.opponent)", category: .games)
+                let players = try await playerService.fetchPlayersInGame(gameId: game.id)
+                await MainActor.run {
+                    self.rosterPlayers = players
+                    self.currentAtBatIndex = 0 // Reset to first player
+                    self.collectionView.reloadData()
+                    Logger.info("Loaded \(players.count) players in game roster", category: .games)
+                    
+                    // Load player stats now that we have the roster
+                    self.loadPlayerStats()
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to load roster players: \(error.localizedDescription)", category: .games)
+                    self.rosterPlayers = []
+                    self.currentAtBatIndex = 0
+                    self.collectionView.reloadData()
+                }
             }
-            
-            cell.contentConfiguration = content
-            return cell
-            
-        case .interactiveView:
-            // Interactive View section
-            let cell = tableView.dequeueReusableCell(withIdentifier: "PlayerCell", for: indexPath)
-            var content = cell.defaultContentConfiguration()
-            
-            if indexPath.row == 0 {
-                content.text = "Open Interactive Diamond View"
-                content.image = UIImage(systemName: "baseball.diamond.bases")
-            } else {
-                content.text = "Record Play-by-Play"
-                content.image = UIImage(systemName: "sportscourt.fill")
+        }
+    }
+    
+    private func loadPastGames() {
+        guard let game = currentGame else { return }
+        
+        Task {
+            do {
+                Logger.debug("Loading past games against: \(game.opponent)", category: .games)
+                let allGames = try await gameService.fetchAllGames()
+                let gamesAgainstOpponent = allGames.filter { 
+                    $0.opponent == game.opponent && $0.id != game.id 
+                }
+                await MainActor.run {
+                    self.pastGames = gamesAgainstOpponent
+                    self.collectionView.reloadData()
+                    Logger.info("Loaded \(gamesAgainstOpponent.count) past games against \(game.opponent)", category: .games)
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to load past games: \(error.localizedDescription)", category: .games)
+                    self.pastGames = []
+                    self.collectionView.reloadData()
+                }
             }
-            content.imageProperties.tintColor = .systemBlue
-            
-            cell.contentConfiguration = content
-            cell.accessoryType = .disclosureIndicator
-            return cell
-            
-        case .stats:
-            // Stats section
-            let cell = tableView.dequeueReusableCell(withIdentifier: "StatsCell", for: indexPath) as! StatsCell
-            cell.configure(with: playerStats[indexPath.row])
-            return cell
         }
     }
     
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        guard let sectionType = Section(rawValue: section) else { return nil }
+    private func loadRecentAtBats() {
+        guard let game = currentGame else { return }
         
-        switch sectionType {
-        case .gameInfo:
-            return "Game Information"
-        case .interactiveView:
-            return "Interactive View"
-        case .stats:
-            return "Player Statistics"
-        }
-    }
-    
-    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        guard section == Section.stats.rawValue else { return nil }
-        
-        return createStatsHeaderView()
-    }
-    
-    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return section == Section.stats.rawValue ? 40 : UITableView.automaticDimension
-    }
-    
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        return indexPath.section == Section.stats.rawValue ? 44 : UITableView.automaticDimension
-    }
-    
-    // MARK: - Table View Customizations
-    
-    func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
-        if section == Section.stats.rawValue, let header = view as? UITableViewHeaderFooterView {
-            // Set the background color of the header
-            header.contentView.backgroundColor = .systemGroupedBackground
-        }
-    }
-}
-
-// MARK: - UITableViewDelegate
-
-extension GameViewController: UITableViewDelegate {
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        
-        guard let section = Section(rawValue: indexPath.section) else { return }
-        
-        if section == .interactiveView {
-            if indexPath.row == 0 {
-                presentInteractiveDiamondView()
-            } else if indexPath.row == 1 {
-                presentPlayEntryView()
+        Task {
+            do {
+                Logger.debug("Loading recent at-bats for game: \(game.opponent)", category: .games)
+                let atBats = try await statService.fetchRecentAtBats(gameId: game.id, limit: 10)
+                await MainActor.run {
+                    self.recentAtBats = atBats
+                    self.collectionView.reloadData()
+                    Logger.info("Loaded \(atBats.count) recent at-bats", category: .games)
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to load recent at-bats: \(error.localizedDescription)", category: .games)
+                    self.recentAtBats = []
+                    self.collectionView.reloadData()
+                }
             }
-        } else if section == .stats {
-            // Player row tapped - present ABViewController
-            presentAtBatView(for: playerStats[indexPath.row].player)
         }
     }
     
-    private func presentInteractiveDiamondView() {
-        let interactiveDiamondVC = InteractiveDiamondViewController()
+    private func loadPlayerStats() {
+        guard let game = currentGame else { return }
         
-        if let sheet = interactiveDiamondVC.sheetPresentationController {
-            sheet.detents = [.medium()]
-            sheet.prefersGrabberVisible = true
-            sheet.preferredCornerRadius = 20
-        }
-        
-        present(interactiveDiamondVC, animated: true)
-    }
-    
-    private func presentPlayEntryView() {
-        let playEntryVC = PlayEntryViewController()
-        let navController = UINavigationController(rootViewController: playEntryVC)
-        
-        if let sheet = navController.sheetPresentationController {
-            
-            sheet.detents = [.medium(), .large()]
-            sheet.prefersGrabberVisible = true
-            sheet.preferredCornerRadius = 20
-        }
-        
-        playEntryVC.isModalInPresentation = true
-        navController.isModalInPresentation = true
-        
-        present(navController, animated: true)
-    }
-    
-    private func presentAtBatView(for player: Player) {
-        let abVC = ABViewController(player: player)
-        let navController = UINavigationController(rootViewController: abVC)
-        
-        // Set up completion handler
-        abVC.onAtBatComplete = { [weak self] result, isOut in
-            guard let self = self else { return }
-            
-            print("At-bat complete: \(player.firstName) \(player.lastName) - \(result)")
-            
-            // Find the player's index in the playerStats array
-            if let index = self.playerStats.firstIndex(where: { $0.player.id == player.id }) {
-                // Update player stats based on the at-bat result
-                var updatedStat = self.playerStats[index]
+        Task {
+            do {
+                Logger.debug("Loading player stats for game: \(game.opponent)", category: .games)
+                var statsDict: [UUID: PlayerGameStats] = [:]
                 
-                // Increment at-bats
-                let newAtBats = updatedStat.atBats + 1
-                
-                // Default values
-                var newHits = updatedStat.hits
-                var newRuns = updatedStat.runs
-                var newRbis = updatedStat.rbis
-                var newHomeRuns = updatedStat.homeRuns
-                var newWalks = updatedStat.walks
-                var newStrikeouts = updatedStat.strikeouts
-                
-                // Update stats based on result
-                switch result {
-                case "K":
-                    newStrikeouts += 1
-                case "BB":
-                    newWalks += 1
-                    // Walk doesn't count as an at-bat in baseball stats
-                    // Revert at-bat increment for walks
-                    let correctedAtBats = newAtBats - 1
-                case "1B":
-                    newHits += 1
-                case "2B":
-                    newHits += 1
-                case "3B":
-                    newHits += 1
-                case "HR":
-                    newHits += 1
-                    newHomeRuns += 1
-                    newRuns += 1
-                    // Add at least 1 RBI for the batter
-                    newRbis += 1
-                case "Out":
-                    // No change needed for outs
-                    break
-                default:
-                    break
+                for player in rosterPlayers {
+                    let playerStats = try await statService.getPlayerGameStats(gameId: game.id, player: player)
+                    statsDict[player.id] = playerStats
                 }
                 
-                // Calculate updated batting average
-                let average = newAtBats > 0 ? String(format: ".%03d", Int(Double(newHits) / Double(newAtBats) * 1000)) : ".000"
-                
-                // Create updated player stat
-                let updatedPlayerStat = PlayerStat(
-                    player: player,
-                    atBats: result == "BB" ? updatedStat.atBats : newAtBats,
-                    runs: newRuns,
-                    hits: newHits,
-                    rbis: newRbis,
-                    homeRuns: newHomeRuns,
-                    walks: newWalks,
-                    strikeouts: newStrikeouts,
-                    average: average
-                )
-                
-                // Update the playerStats array
-                self.playerStats[index] = updatedPlayerStat
-                
-                // Refresh the table
-                self.tableView.reloadSections(IndexSet(integer: Section.stats.rawValue), with: .automatic)
+                await MainActor.run {
+                    self.playerGameStats = statsDict
+                    self.collectionView.reloadData()
+                    Logger.info("Loaded stats for \(statsDict.count) players", category: .games)
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to load player stats: \(error.localizedDescription)", category: .games)
+                    // Create empty stats for all players
+                    var emptyStats: [UUID: PlayerGameStats] = [:]
+                    for player in self.rosterPlayers {
+                        emptyStats[player.id] = PlayerGameStats(player: player, stats: [])
+                    }
+                    self.playerGameStats = emptyStats
+                    self.collectionView.reloadData()
+                }
             }
         }
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .systemGroupedBackground
+        view.addSubview(collectionView)
+        
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+    
+    private func setupNavigationBar() {
+        guard let game = currentGame else { return }
+        title = "vs. \(game.opponent)"
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMM d, yyyy"
+        let subtitle = dateFormatter.string(from: game.date)
+        
+        let stackView = UIStackView()
+        stackView.axis = .vertical
+        stackView.alignment = .center
+        
+        let titleLabel = UILabel()
+        titleLabel.text = title
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.textColor = .label
+        
+        let subtitleLabel = UILabel()
+        subtitleLabel.text = subtitle
+        subtitleLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabel
+        
+        stackView.addArrangedSubview(titleLabel)
+        stackView.addArrangedSubview(subtitleLabel)
+        
+        navigationItem.titleView = stackView
+        
+        let menuActions = [
+            UIAction(title: "Edit Game", image: UIImage(systemName: "pencil")) { [weak self] _ in
+                self?.editGameTapped()
+            },
+            UIAction(title: "Edit Roster", image: UIImage(systemName: "person.2")) { [weak self] _ in
+                self?.editRosterTapped()
+            },
+            UIAction(title: "End Game", image: UIImage(systemName: "flag.checkered"), attributes: .destructive) { [weak self] _ in
+                self?.endGameTapped()
+            }
+        ]
+        
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis"),
+            menu: UIMenu(children: menuActions)
+        )
+    }
+    
+    private func createLayout() -> UICollectionViewLayout {
+        return UICollectionViewCompositionalLayout(sectionProvider: { sectionIndex, environment in
+            switch sectionIndex {
+            case 0:
+                return self.createAtBatSection()
+            case 1:
+                return self.createStatisticsSection(environment: environment)
+            case 2:
+                return self.createRecentAtBatsSection(environment: environment)
+            case 3:
+                return self.createPastGamesSection()
+            default:
+                return self.createAtBatSection()
+            }
+        })
+    }
+    
+    private func createAtBatSection() -> NSCollectionLayoutSection {
+        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        
+        let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(60))
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+        
+        let section = NSCollectionLayoutSection(group: group)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14)
+        
+        // Add section header
+        let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
+        let header = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: headerSize, elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
+        
+        // Add section footer
+        let footerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(30))
+        let footer = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: footerSize, elementKind: UICollectionView.elementKindSectionFooter, alignment: .bottom)
+        
+        section.boundarySupplementaryItems = [header, footer]
+        
+        return section
+    }
+    
+    private func createStatisticsSection(environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
+        let configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+        
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 20, trailing: 14)
+        
+        // Add section header with explicit 44pt height like other sections
+        let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
+        let header = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: headerSize, elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
+        section.boundarySupplementaryItems = [header]
+        
+        return section
+    }
+    
+    private func createRecentAtBatsSection(environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
+        let configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+        
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 20, trailing: 14)
+        
+        // Add section header
+        let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
+        let header = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: headerSize, elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
+        section.boundarySupplementaryItems = [header]
+        
+        return section
+    }
+    
+    private func createPastGamesSection() -> NSCollectionLayoutSection {
+        let itemSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(120))
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        item.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6)
+        
+        let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(120))
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+        
+        let section = NSCollectionLayoutSection(group: group)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 20, trailing: 14)
+        section.interGroupSpacing = 12
+        
+        // Add section header
+        let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
+        let header = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: headerSize, elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
+        section.boundarySupplementaryItems = [header]
+        
+        return section
+    }
+    
+    private func editGameTapped() {
+        let editGameVC = EditGameViewController()
+        if let game = currentGame {
+            editGameVC.configure(with: game)
+        }
+        let navController = UINavigationController(rootViewController: editGameVC)
         
         if let sheet = navController.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
+            sheet.detents = [.large()]
             sheet.prefersGrabberVisible = true
-            sheet.preferredCornerRadius = 20
         }
         
         present(navController, animated: true)
     }
-} 
+    
+    private func editRosterTapped() {
+        // TODO: Navigate to roster editing
+        print("Edit Roster tapped")
+    }
+    
+    private func endGameTapped() {
+        // TODO: Show end game confirmation and logic
+        print("End Game tapped")
+    }
+    
+    private func previousPlayer() {
+        guard !rosterPlayers.isEmpty else { return }
+        
+        currentAtBatIndex = (currentAtBatIndex - 1 + rosterPlayers.count) % rosterPlayers.count
+        Logger.info("Previous player: \(rosterPlayers[currentAtBatIndex].name) (\(currentAtBatIndex + 1)/\(rosterPlayers.count))", category: .games)
+        
+        // Reload At Bat and Statistics sections
+        collectionView.reloadSections(IndexSet([0, 1]))
+    }
+    
+    private func nextPlayer() {
+        guard !rosterPlayers.isEmpty else { return }
+        
+        currentAtBatIndex = (currentAtBatIndex + 1) % rosterPlayers.count
+        Logger.info("Next player: \(rosterPlayers[currentAtBatIndex].name) (\(currentAtBatIndex + 1)/\(rosterPlayers.count))", category: .games)
+        
+        // Reload At Bat and Statistics sections
+        collectionView.reloadSections(IndexSet([0, 1]))
+    }
+    
+    private func incrementInning() {
+        currentInning += 1
+        Logger.info("Inning incremented to: \(currentInning)", category: .games)
+        
+        // Reload At Bat section to update the inning display
+        collectionView.reloadSections(IndexSet([0]))
+    }
+    
+    private func decrementInning() {
+        if currentInning > 1 {
+            currentInning -= 1
+            Logger.info("Inning decremented to: \(currentInning)", category: .games)
+            
+            // Reload At Bat section to update the inning display
+            collectionView.reloadSections(IndexSet([0]))
+        }
+    }
+    
+    @objc private func atBatCellTapped() {
+        guard let game = currentGame,
+              !rosterPlayers.isEmpty else {
+            Logger.notice("Cannot record at-bat: missing game or no players", category: .games)
+            return
+        }
+        
+        let currentPlayer = rosterPlayers[currentAtBatIndex]
+        let recordAtBatVC = RecordAtBatViewController()
+        recordAtBatVC.configure(game: game, player: currentPlayer, inning: currentInning)
+        
+        // Set completion handler to refresh data and advance to next player
+        recordAtBatVC.onAtBatSaved = { [weak self] in
+            self?.handleAtBatSaved()
+        }
+        
+        let navController = UINavigationController(rootViewController: recordAtBatVC)
+        
+        if let sheet = navController.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        
+        present(navController, animated: true)
+    }
+    
+    private func formatAtBatOutcome(_ stat: Stat) -> String {
+        // Start with the base outcome
+        var baseOutcome: String
+        
+        // Use the outcome field if available, otherwise format from type
+        if let outcome = stat.outcome, !outcome.isEmpty {
+            baseOutcome = outcome
+        } else {
+            switch stat.type {
+            case .hit, .single:
+                baseOutcome = "Single"
+            case .double:
+                baseOutcome = "Double"
+            case .triple:
+                baseOutcome = "Triple"
+            case .homeRun:
+                baseOutcome = "Home Run"
+            case .strikeOut:
+                baseOutcome = "Strikeout"
+            case .walk:
+                baseOutcome = "Walk"
+            case .atBat:
+                baseOutcome = "Out"
+            case .rbi:
+                baseOutcome = "RBI"
+            case .run:
+                baseOutcome = "Run"
+            case .error:
+                baseOutcome = "Error"
+            case .fieldersChoice:
+                baseOutcome = "Fielder's Choice"
+            case .sacrifice:
+                baseOutcome = "Sacrifice"
+            case .flyOut:
+                baseOutcome = "Flyout"
+            }
+        }
+        
+        // Special formatting for home runs with RBIs
+        if stat.type == .homeRun, let rbiCount = stat.runsBattedIn, rbiCount > 0 {
+            if rbiCount == 1 {
+                return "Solo homer"
+            } else {
+                return "\(rbiCount)-run homer"
+            }
+        }
+        
+        // Add RBI information for non-home runs if present and greater than 0
+        if let rbiCount = stat.runsBattedIn, rbiCount > 0 {
+            return "\(rbiCount) RBI, \(baseOutcome)"
+        } else {
+            return baseOutcome
+        }
+    }
+    
+    /// Call this method when an at-bat is recorded to refresh the data
+    func refreshAfterAtBat() {
+        loadRecentAtBats()
+        loadPlayerStats()
+    }
+    
+    private func handleAtBatSaved() {
+        Logger.info("At-bat saved, refreshing data and advancing to next player", category: .games)
+        
+        // Refresh the data
+        refreshAfterAtBat()
+        
+        // Advance to next player
+        nextPlayer()
+    }
+}
+
+// MARK: - UICollectionViewDataSource
+
+extension GameViewController: UICollectionViewDataSource {
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        return 4  // At Bat, Statistics, Recent At-Bats, Past Games
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        switch section {
+        case 0:
+            return rosterPlayers.isEmpty ? 0 : 1 // At Bat section (hide if no players)
+        case 1:
+            return rosterPlayers.count // Statistics section
+        case 2:
+            // Recent At-Bats section: add 1 for "View All" cell
+            return recentAtBats.count > 0 ? recentAtBats.count + 1 : 0 
+        case 3:
+            return pastGames.count // Past Games section
+        default:
+            return 0
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        switch indexPath.section {
+        case 0:
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: AtBatCell.identifier, for: indexPath) as! AtBatCell
+            // Show current at-bat player
+            let currentPlayer = rosterPlayers.isEmpty ? Player(name: "No Players", number: nil) : rosterPlayers[currentAtBatIndex]
+            cell.configure(with: currentPlayer)
+            cell.onPreviousPlayer = { [weak self] in
+                self?.previousPlayer()
+            }
+            cell.onNextPlayer = { [weak self] in
+                self?.nextPlayer()
+            }
+            cell.onAtBatTapped = { [weak self] in
+                self?.atBatCellTapped()
+            }
+            cell.onInningIncrement = { [weak self] in
+                self?.incrementInning()
+            }
+            cell.onInningDecrement = { [weak self] in
+                self?.decrementInning()
+            }
+            return cell
+            
+        case 1:
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PlayerStatCell.identifier, for: indexPath) as! PlayerStatCell
+            let player = rosterPlayers[indexPath.item]
+            
+            // Get real stats for the player, or create empty stats if not loaded yet
+            let playerStats = playerGameStats[player.id] ?? PlayerGameStats(player: player, stats: [])
+            
+            let isCurrentAtBat = indexPath.item == currentAtBatIndex // Highlight current at-bat player
+            cell.configure(with: playerStats, isCurrentAtBat: isCurrentAtBat)
+            return cell
+            
+        case 2:
+            // Recent At-Bats section
+            if indexPath.item < recentAtBats.count {
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: AtBatOutcomeCell.identifier, for: indexPath) as! AtBatOutcomeCell
+                let atBat = recentAtBats[indexPath.item]
+                
+                // Find the player for this at-bat
+                let player = rosterPlayers.first { $0.id == atBat.playerId } ?? Player(name: "Unknown", number: nil)
+                let outcome = formatAtBatOutcome(atBat)
+                
+                cell.configure(playerName: player.name, outcome: outcome, statType: atBat.type)
+                return cell
+            } else {
+                // This is the "View All" cell at the bottom
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ViewAllCell.identifier, for: indexPath) as! ViewAllCell
+                return cell
+            }
+            
+        case 3:
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: GameCell.identifier, for: indexPath) as! GameCell
+            let game = pastGames[indexPath.item]
+            cell.configure(with: game)
+            return cell
+            
+        default:
+            return UICollectionViewCell()
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
+        if kind == UICollectionView.elementKindSectionHeader {
+            switch indexPath.section {
+            case 0:
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: AtBatSectionHeader.identifier, for: indexPath) as! AtBatSectionHeader
+                header.configure(inning: currentInning)
+                return header
+            case 1:
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: StatisticsHeaderView.identifier, for: indexPath) as! StatisticsHeaderView
+                header.configure(title: "Statistics")
+                return header
+            case 2:
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: SectionHeaderView.identifier, for: indexPath) as! SectionHeaderView
+                header.configure(title: "PLAY-BY-PLAY")
+                return header
+            case 3:
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: SectionHeaderView.identifier, for: indexPath) as! SectionHeaderView
+                header.configure(title: "PAST GAMES")
+                return header
+            default:
+                break
+            }
+        } else if kind == UICollectionView.elementKindSectionFooter {
+            switch indexPath.section {
+            case 0:
+                let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: SectionFooterView.identifier, for: indexPath) as! SectionFooterView
+                footer.configure(title: "Tap to record AB • Long press to change inning")
+                return footer
+            default:
+                break
+            }
+        }
+        return UICollectionReusableView()
+    }
+}
+
+// MARK: - UICollectionViewDelegate
+
+extension GameViewController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        
+        switch indexPath.section {
+        case 0:
+            atBatCellTapped()
+        case 1:
+            let player = rosterPlayers[indexPath.item]
+            let playerStatVC = PlayerStatViewController()
+            if let game = currentGame {
+                playerStatVC.configure(with: player, game: game)
+            }
+            navigationController?.pushViewController(playerStatVC, animated: true)
+        case 2:
+            // Recent At-Bats section
+            if indexPath.item < recentAtBats.count {
+                // Regular at-bat cell tapped
+                let atBat = recentAtBats[indexPath.item]
+                Logger.debug("At-bat tapped", category: .games)
+                // TODO: Show at-bat details or allow editing
+            } else {
+                // "View All" cell tapped - navigate to PlayByPlayViewController
+                guard let game = currentGame else { return }
+                
+                let playByPlayVC = PlayByPlayViewController()
+                playByPlayVC.configure(with: game)
+                navigationController?.pushViewController(playByPlayVC, animated: true)
+                Logger.debug("View All Play-by-Play tapped", category: .games)
+            }
+        case 3:
+            // TODO: Navigate to past game details
+            Logger.debug("Past game tapped - navigation not implemented yet", category: .games)
+        default:
+            break
+        }
+    }
+}
