@@ -25,13 +25,39 @@ class ViewController: UIViewController {
         return collectionView
     }()
     
-    private let mockDataManager = MockDataManager.shared
+    private let gameService = GameService.shared
+    private var games: [Game] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
         
         setupUI()
         setupNavigationBar()
+        loadGames()
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        loadGames()
+    }
+    
+    private func loadGames() {
+        Task {
+            do {
+                Logger.debug("Loading games from GameService", category: .games)
+                let fetchedGames = try await gameService.fetchAllGames()
+                await MainActor.run {
+                    self.games = fetchedGames
+                    self.collectionView.reloadData()
+                    Logger.info("Successfully loaded \(fetchedGames.count) games", category: .games)
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to load games: \(error.localizedDescription)", category: .games)
+                    self.showAlert(title: "Error", message: "Failed to load games: \(error.localizedDescription)")
+                }
+            }
+        }
     }
     
     private func setupUI() {
@@ -47,8 +73,16 @@ class ViewController: UIViewController {
     }
     
     private func setupNavigationBar() {
-//        title = "BatStat"
-//        navigationController?.navigationBar.prefersLargeTitles = true
+        title = "BatStat"
+        navigationController?.navigationBar.prefersLargeTitles = true
+        
+        // Add settings gear icon
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            image: UIImage(systemName: "gear"),
+            style: .plain,
+            target: self,
+            action: #selector(settingsTapped)
+        )
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -101,13 +135,51 @@ class ViewController: UIViewController {
     }
     
     @objc func addNewGameTapped() {
-        let gameVC = GameViewController()
-        navigationController?.pushViewController(gameVC, animated: true)
+        let editGameVC = EditGameViewController()
+        let navController = UINavigationController(rootViewController: editGameVC)
+        
+        // Add completion handler to reload games when EditGameViewController is dismissed
+        navController.presentationController?.delegate = self
+        
+        present(navController, animated: true)
     }
     
     @objc func playersAndStatsTapped() {
-        // TODO: Navigate to Players & Stats screen
-        print("Players & Stats tapped")
+        let playersVC = PlayersListViewController()
+        navigationController?.pushViewController(playersVC, animated: true)
+    }
+    
+    @objc func settingsTapped() {
+        let settingsVC = SettingsViewController()
+        let navController = UINavigationController(rootViewController: settingsVC)
+        present(navController, animated: true)
+    }
+    
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+    
+    private func markGameAsFinished(_ game: Game) {
+        Task {
+            do {
+                Logger.info("Marking game as finished: \(game.opponent)", category: .games)
+                let updatedGame = try await gameService.markGameAsFinished(gameId: game.id)
+                await MainActor.run {
+                    if let index = self.games.firstIndex(where: { $0.id == game.id }) {
+                        self.games[index] = updatedGame
+                        self.collectionView.reloadData()
+                        Logger.info("Successfully marked game as finished", category: .games)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to mark game as finished: \(error.localizedDescription)", category: .games)
+                    self.showAlert(title: "Error", message: "Failed to update game: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 }
 
@@ -123,7 +195,7 @@ extension ViewController: UICollectionViewDataSource {
         case 0:
             return 2 // Players & Stats, New Game
         case 1:
-            return mockDataManager.games.count
+            return games.count
         default:
             return 0
         }
@@ -146,7 +218,7 @@ extension ViewController: UICollectionViewDataSource {
             
         case 1:
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: GameCell.identifier, for: indexPath) as! GameCell
-            let game = mockDataManager.games[indexPath.item]
+            let game = games[indexPath.item]
             cell.configure(with: game)
             return cell
             
@@ -158,7 +230,9 @@ extension ViewController: UICollectionViewDataSource {
     func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         if kind == UICollectionView.elementKindSectionHeader && indexPath.section == 1 {
             let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: SectionHeaderView.identifier, for: indexPath) as! SectionHeaderView
-            header.configure(title: "GAMES")
+            let completedGames = games.filter { $0.isComplete }.count
+            let totalGames = games.count
+            header.configure(title: "GAMES (\(completedGames)/\(totalGames) completed)")
             return header
         }
         return UICollectionReusableView()
@@ -179,12 +253,22 @@ extension ViewController: UICollectionViewDelegate {
                 addNewGameTapped()
             }
         case 1:
-            let game = mockDataManager.games[indexPath.item]
+            let game = games[indexPath.item]
             let gameVC = GameViewController()
             gameVC.configure(with: game)
             navigationController?.pushViewController(gameVC, animated: true)
         default:
             break
         }
+    }
+}
+
+// MARK: - UIAdaptivePresentationControllerDelegate
+
+extension ViewController: UIAdaptivePresentationControllerDelegate {
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        // Reload games when EditGameViewController is dismissed
+        Logger.debug("EditGameViewController dismissed, reloading games", category: .games)
+        loadGames()
     }
 }

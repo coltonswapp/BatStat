@@ -78,6 +78,7 @@ class AtBatOptionCell: UICollectionViewListCell {
     }
     
     private func setupRBIMenu() {
+        // Default menu - will be updated in configure method based on option type
         let menuActions = [
             UIAction(title: "0 RBI", handler: { [weak self] _ in
                 self?.rbiButton.setTitle("0 RBI", for: .normal)
@@ -101,6 +102,31 @@ class AtBatOptionCell: UICollectionViewListCell {
         rbiButton.showsMenuAsPrimaryAction = true
     }
     
+    private func setupHomeRunRBIMenu() {
+        // Home run menu starts from 1 RBI (minimum)
+        let menuActions = [
+            UIAction(title: "1 RBI", handler: { [weak self] _ in
+                self?.rbiButton.setTitle("1 RBI", for: .normal)
+                self?.onRBISelection?(1)
+            }),
+            UIAction(title: "2 RBI", handler: { [weak self] _ in
+                self?.rbiButton.setTitle("2 RBI", for: .normal)
+                self?.onRBISelection?(2)
+            }),
+            UIAction(title: "3 RBI", handler: { [weak self] _ in
+                self?.rbiButton.setTitle("3 RBI", for: .normal)
+                self?.onRBISelection?(3)
+            }),
+            UIAction(title: "4 RBI", handler: { [weak self] _ in
+                self?.rbiButton.setTitle("4 RBI", for: .normal)
+                self?.onRBISelection?(4)
+            })
+        ]
+        
+        rbiButton.menu = UIMenu(title: "Select RBI Count", children: menuActions)
+        rbiButton.showsMenuAsPrimaryAction = true
+    }
+    
     func configure(with option: AtBatOption, isSelected: Bool = false) {
         titleLabel.text = option.title
         rbiButton.isHidden = !option.showRBIButton
@@ -110,7 +136,15 @@ class AtBatOptionCell: UICollectionViewListCell {
         iconImageView.isHidden = false
         
         if option.showRBIButton {
-            rbiButton.setTitle("0 RBI", for: .normal)
+            // Home runs default to 1 RBI (minimum), other options default to 0
+            if option.type == .homeRun {
+                setupHomeRunRBIMenu() // Use home run specific menu
+                rbiButton.setTitle("1 RBI", for: .normal)
+                onRBISelection?(1) // Automatically set 1 RBI for home runs
+            } else {
+                setupRBIMenu() // Use regular menu for other options
+                rbiButton.setTitle("0 RBI", for: .normal)
+            }
         }
     }
     
@@ -132,7 +166,7 @@ struct AtBatOption {
     
     init(option: AtBatOptionType) {
         title = option.rawValue
-        showRBIButton = option == .rbi
+        showRBIButton = option == .rbi // Show RBI button only for RBI option
         type = option
     }
     

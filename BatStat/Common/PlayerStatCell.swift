@@ -3,12 +3,32 @@ import UIKit
 class PlayerStatCell: UICollectionViewListCell {
     static let identifier = "PlayerStatCell"
     
+    private let atBatIconImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.image = UIImage(systemName: "figure.baseball")
+        imageView.tintColor = .systemBlue
+        imageView.contentMode = .scaleAspectFit
+        imageView.isHidden = true // Hidden by default
+        return imageView
+    }()
+    
     private let playerNameLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = .systemFont(ofSize: 14, weight: .medium)
         label.textColor = .label
         return label
+    }()
+    
+    private let fakeHeaderStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.axis = .horizontal
+        stackView.distribution = .fillEqually
+        stackView.spacing = 2
+        stackView.alpha = 0 // Make it invisible
+        return stackView
     }()
     
     private let statsStackView: UIStackView = {
@@ -37,25 +57,44 @@ class PlayerStatCell: UICollectionViewListCell {
     }
     
     private func setupUI() {
+        // Create fake header labels to match the header layout
+        let fakeHeaderLabels = ["AB", "R", "H", "RBI", "HR", "AVG"]
+        for text in fakeHeaderLabels {
+            let label = UILabel()
+            label.text = text
+            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            label.textAlignment = .center
+            fakeHeaderStackView.addArrangedSubview(label)
+        }
+        
         // Setup stat labels
         let statLabels = [abLabel, rLabel, hLabel, rbiLabel, hrLabel, avgLabel]
         for label in statLabels {
-            label.font = .systemFont(ofSize: 13, weight: .regular)
+            label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .label
             label.textAlignment = .center
             statsStackView.addArrangedSubview(label)
         }
         
+        addSubview(atBatIconImageView)
         addSubview(playerNameLabel)
+        addSubview(fakeHeaderStackView)
         addSubview(statsStackView)
         
         NSLayoutConstraint.activate([
+            atBatIconImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            atBatIconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            atBatIconImageView.widthAnchor.constraint(equalToConstant: 16),
+            atBatIconImageView.heightAnchor.constraint(equalToConstant: 16),
+            
             playerNameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
             playerNameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            playerNameLabel.widthAnchor.constraint(equalToConstant: 120),
             
-//            statsStackView.leadingAnchor.constraint(equalTo: playerNameLabel.trailingAnchor, constant: 16),
-            statsStackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            fakeHeaderStackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            fakeHeaderStackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            
+            statsStackView.leadingAnchor.constraint(equalTo: fakeHeaderStackView.leadingAnchor),
+            statsStackView.trailingAnchor.constraint(equalTo: fakeHeaderStackView.trailingAnchor),
             statsStackView.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }
@@ -69,14 +108,17 @@ class PlayerStatCell: UICollectionViewListCell {
         rbiLabel.text = "\(playerStats.rbis)"
         hrLabel.text = "\(playerStats.homeRuns)"
         let avg = playerStats.battingAverage
-        avgLabel.text = avg >= 1.0 ? String(format: "%.3f", avg) : String(String(format: "%.3f", avg).dropFirst())
-        
-        // Use backgroundConfiguration for UICollectionViewListCell
-        var backgroundConfig = UIBackgroundConfiguration.listGroupedCell()
-        if isCurrentAtBat {
-            backgroundConfig.backgroundColor = .systemBlue.withAlphaComponent(0.1)
+        if avg >= 1.0 {
+            avgLabel.text = String(format: "%.2f", avg)  // Show "1.0" for perfect average
+        } else {
+            avgLabel.text = String(format: ".%03d", Int(round(avg * 1000)))  // Show ".333" format
         }
-        backgroundConfiguration = backgroundConfig
+        
+        // Show/hide the baseball icon based on current at-bat status
+        atBatIconImageView.isHidden = !isCurrentAtBat
+        
+        // Use standard background configuration (no more blue background)
+        backgroundConfiguration = UIBackgroundConfiguration.listGroupedCell()
     }
     
     override func prepareForReuse() {
@@ -88,6 +130,7 @@ class PlayerStatCell: UICollectionViewListCell {
         rbiLabel.text = nil
         hrLabel.text = nil
         avgLabel.text = nil
+        atBatIconImageView.isHidden = true
         backgroundConfiguration = UIBackgroundConfiguration.listGroupedCell()
     }
 }

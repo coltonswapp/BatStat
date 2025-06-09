@@ -14,6 +14,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         
+        // Initialize logging system
+        Logger.setup()
+        Logger.info("BatStat application launched", category: .general)
+        
         return true
     }
 

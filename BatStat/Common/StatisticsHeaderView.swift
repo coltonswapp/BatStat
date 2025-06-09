@@ -48,7 +48,7 @@ class StatisticsHeaderView: UICollectionReusableView {
         ]
         
         for (label, text) in headerLabels {
-            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
             label.textColor = .secondaryLabel
             label.textAlignment = .center
             label.text = text

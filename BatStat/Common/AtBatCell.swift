@@ -6,6 +6,8 @@ class AtBatCell: UICollectionViewCell {
     var onPreviousPlayer: (() -> Void)?
     var onNextPlayer: (() -> Void)?
     var onAtBatTapped: (() -> Void)?
+    var onInningIncrement: (() -> Void)?
+    var onInningDecrement: (() -> Void)?
     
     private let previousButton: UIButton = {
         let button = UIButton(type: .system)
@@ -34,6 +36,15 @@ class AtBatCell: UICollectionViewCell {
         return label
     }()
     
+    private let stackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.distribution = .fill
+        stackView.spacing = 16
+        return stackView
+    }()
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -50,29 +61,29 @@ class AtBatCell: UICollectionViewCell {
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
         
-        addSubview(previousButton)
-        addSubview(nextButton)
-        addSubview(playerLabel)
+        // Add buttons and player label to horizontal stack
+        stackView.addArrangedSubview(previousButton)
+        stackView.addArrangedSubview(playerLabel)
+        stackView.addArrangedSubview(nextButton)
+        
+        addSubview(stackView)
         
         NSLayoutConstraint.activate([
-            // Previous button on left
-            previousButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            previousButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // Button constraints
             previousButton.widthAnchor.constraint(equalToConstant: 40),
             previousButton.heightAnchor.constraint(equalToConstant: 40),
-            
-            // Next button on right
-            nextButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            nextButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             nextButton.widthAnchor.constraint(equalToConstant: 40),
             nextButton.heightAnchor.constraint(equalToConstant: 40),
             
-            // Player label in center
-            playerLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            playerLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            playerLabel.leadingAnchor.constraint(greaterThanOrEqualTo: previousButton.trailingAnchor, constant: 16),
-            playerLabel.trailingAnchor.constraint(lessThanOrEqualTo: nextButton.leadingAnchor, constant: -16)
+            // Stack view constraints
+            stackView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
         ])
+        
+        // Player label should expand to fill available space
+        playerLabel.setContentHuggingPriority(UILayoutPriority(249), for: .horizontal)
     }
     
     private func setupActions() {
@@ -81,10 +92,14 @@ class AtBatCell: UICollectionViewCell {
         
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(cellTapped))
         addGestureRecognizer(tapGesture)
+        
+        // Add context menu interaction for inning control
+        let contextMenuInteraction = UIContextMenuInteraction(delegate: self)
+        addInteraction(contextMenuInteraction)
     }
     
     func configure(with player: Player) {
-        let displayName = "\(player.name) #\(player.number ?? 0)"
+        let displayName = "#\(player.number ?? 0) \(player.name)"
         playerLabel.text = displayName
     }
     
@@ -106,6 +121,8 @@ class AtBatCell: UICollectionViewCell {
         onPreviousPlayer = nil
         onNextPlayer = nil
         onAtBatTapped = nil
+        onInningIncrement = nil
+        onInningDecrement = nil
     }
     
     override var isHighlighted: Bool {
@@ -113,6 +130,32 @@ class AtBatCell: UICollectionViewCell {
             UIView.animate(withDuration: 0.1) {
                 self.alpha = self.isHighlighted ? 0.8 : 1.0
             }
+        }
+    }
+}
+
+// MARK: - UIContextMenuInteractionDelegate
+
+extension AtBatCell: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let incrementAction = UIAction(
+                title: "Next Inning",
+                image: UIImage(systemName: "plus.circle"),
+                handler: { [weak self] _ in
+                    self?.onInningIncrement?()
+                }
+            )
+            
+            let decrementAction = UIAction(
+                title: "Previous Inning",
+                image: UIImage(systemName: "minus.circle"),
+                handler: { [weak self] _ in
+                    self?.onInningDecrement?()
+                }
+            )
+            
+            return UIMenu(title: "Inning Control", children: [incrementAction, decrementAction])
         }
     }
 }

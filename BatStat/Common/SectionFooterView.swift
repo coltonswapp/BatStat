@@ -9,6 +9,7 @@ class SectionFooterView: UICollectionReusableView {
         label.font = .systemFont(ofSize: 13, weight: .regular)
         label.textColor = .tertiaryLabel
         label.textAlignment = .center
+        label.numberOfLines = 0
         return label
     }()
     
@@ -31,8 +32,9 @@ class SectionFooterView: UICollectionReusableView {
         ])
     }
     
-    func configure(title: String) {
+    func configure(title: String, alignment: NSTextAlignment = .center) {
         titleLabel.text = title
+        titleLabel.textAlignment = alignment
     }
     
     override func prepareForReuse() {

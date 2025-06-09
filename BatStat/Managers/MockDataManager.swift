@@ -8,15 +8,15 @@ class MockDataManager {
     // MARK: - Mock Players
     
     lazy var players: [Player] = [
-        Player(name: "M. Johnson", number: 22, primaryPosition: "SS", secondaryPositions: ["2B"]),
-        Player(name: "D. Brown", number: 9, primaryPosition: "CF", secondaryPositions: ["RF", "LF"]),
-        Player(name: "C. Wilson", number: 4, primaryPosition: "1B", secondaryPositions: ["DH"]),
-        Player(name: "J. Davis", number: 12, primaryPosition: "C", secondaryPositions: ["1B"]),
-        Player(name: "A. Martinez", number: 7, primaryPosition: "3B", secondaryPositions: ["SS"]),
-        Player(name: "R. Taylor", number: 15, primaryPosition: "LF", secondaryPositions: ["RF"]),
-        Player(name: "S. Anderson", number: 33, primaryPosition: "P", secondaryPositions: []),
-        Player(name: "K. Thompson", number: 8, primaryPosition: "2B", secondaryPositions: ["SS"]),
-        Player(name: "L. Garcia", number: 19, primaryPosition: "RF", secondaryPositions: ["CF"])
+        Player(name: "M. Johnson", number: 22),
+        Player(name: "D. Brown", number: 9),
+        Player(name: "C. Wilson", number: 4),
+        Player(name: "J. Davis", number: 12),
+        Player(name: "A. Martinez", number: 7),
+        Player(name: "R. Taylor", number: 15),
+        Player(name: "S. Anderson", number: 33),
+        Player(name: "K. Thompson", number: 8),
+        Player(name: "L. Garcia", number: 19)
     ]
     
     // MARK: - Mock Games
@@ -75,7 +75,6 @@ class MockDataManager {
             GameLineup(
                 gameId: gameId,
                 playerId: player.id,
-                position: player.primaryPosition,
                 battingOrder: index + 1
             )
         }
@@ -87,23 +86,23 @@ class MockDataManager {
         var stats: [Stat] = []
         
         // Generate some sample stats for each player
-        for player in players.prefix(4) {
-            // At bats
-            stats.append(Stat(gameId: gameId, playerId: player.id, type: .atBat, value: 3))
-            
-            // Some hits
-            if player.name == "M. Johnson" {
-                stats.append(Stat(gameId: gameId, playerId: player.id, type: .hit, value: 2))
-                stats.append(Stat(gameId: gameId, playerId: player.id, type: .rbi, value: 2))
-            } else if player.name == "D. Brown" {
-                stats.append(Stat(gameId: gameId, playerId: player.id, type: .hit, value: 1))
-            }
-            
-            // Some runs
-            if ["M. Johnson", "C. Wilson"].contains(player.name) {
-                stats.append(Stat(gameId: gameId, playerId: player.id, type: .run, value: 1))
-            }
-        }
+//        for player in players.prefix(4) {
+//            // At bats
+//            stats.append(Stat(gameId: gameId, playerId: player.id, type: .atBat, value: 3))
+//            
+//            // Some hits
+//            if player.name == "M. Johnson" {
+//                stats.append(Stat(gameId: gameId, playerId: player.id, type: .hit, value: 2))
+//                stats.append(Stat(gameId: gameId, playerId: player.id, type: .rbi, value: 2))
+//            } else if player.name == "D. Brown" {
+//                stats.append(Stat(gameId: gameId, playerId: player.id, type: .hit, value: 1))
+//            }
+//            
+//            // Some runs
+//            if ["M. Johnson", "C. Wilson"].contains(player.name) {
+//                stats.append(Stat(gameId: gameId, playerId: player.id, type: .run, value: 1))
+//            }
+//        }
         
         return stats
     }

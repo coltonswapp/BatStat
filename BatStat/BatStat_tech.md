@@ -51,8 +51,13 @@
     - First section (.insetGrouped)
         - First cell has a textField to be able to enter the team name (UITextField placeholder "Team Name")
         - Second cell should have a date picker defaulted to today, to change date of game
-    - Section section (.insetGrouped) (section title of "Roster")
+    - Second section (.insetGrouped) (section title of "Roster")
         - List of player names and numbers with reorderability
+        - Roster is limited to 10 players
+        - Edit mode for CollectionView to freely remove rows
+    - Third Section (.insetGrouped) is the player bank
+        - List of ALL players (but not those who are already on the roster)
+        - Edit mode for CollectionView to freely add players to the roster section
         
 - Save button top right corner
 
@@ -61,4 +66,31 @@
     - Each inning will be it's own section
     - Displaying the at-bat results with the associated player's name
     - as the first cell in each section, we should display the number of ABs, Hits, RBI's, etc. Using a new header that is similar to the @statisticsHeaderView (title: "Inning 1") 
-        
+    
+## PlayerSummaryViewController
+- UICollectionView
+    - Section 1, header "All-Time Stats" (use @StatisticsHeaderView)
+        - used to display the all time statistics across all recorded games for the player
+    - Section 2, header "Stats by Game" (use @StatisticsHeaderView)
+        - used to display all the games the user has participated in with stats for that game 
+            - opponent name on left + short date, statistics on right (ex: "Killa Bees ⋅ 6/6")
+            - tapping on the game will navigate to the `PlayerGameSummaryViewController` to see stats for the individual game
+    
+## PlayerGameSummaryViewController
+- used to display how a single player performed in a specific game. 
+- Take inspiration from the @PlayerStatViewController
+    - instead of `TONIGHT` section, `vs. Killa Bees ⋅ 6/6`
+    - display all of the at-bats
+    - remove the cell to add another at bat because this game is presumably ended
+- Include spray chart from the game for the player
+     
+
+## Queries
+- all stats for an individual player
+- all at-bats for an individual player (grouped by game)
+- all at-bats for an individual game (all players)
+
+
+I want to continue to build beyond our @BatStat/Scenes/PlayersListViewController.swift and view player stats on a          │
+│   per-player and per game basis. I'd like to build a `PlayerSummaryViewController` which tells us a variety of statitics.    │
+│   I've included new instructions for `PlayerSummaryViewController`, as well as the `PlayerGameSummaryViewController`  
