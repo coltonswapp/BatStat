@@ -320,6 +320,8 @@ class GameViewController: UIViewController {
             sheet.prefersGrabberVisible = true
         }
         
+        editGameVC.delegate = self
+        
         present(navController, animated: true)
     }
     
@@ -630,5 +632,11 @@ extension GameViewController: UICollectionViewDelegate {
         default:
             break
         }
+    }
+}
+
+extension GameViewController: EditGameViewControllerProtocol {
+    func gameDeleted() {
+        navigationController?.popViewController(animated: true)
     }
 }

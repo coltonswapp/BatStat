@@ -92,6 +92,15 @@ class InningTotalsCell: UICollectionViewListCell {
         hrLabel.text = "\(hr)"
     }
     
+    func configure(title: String, ab: Int, r: Int, h: Int, rbi: Int, hr: Int) {
+        titleLabel.text = title
+        abLabel.text = "\(ab)"
+        rLabel.text = "\(r)"
+        hLabel.text = "\(h)"
+        rbiLabel.text = "\(rbi)"
+        hrLabel.text = "\(hr)"
+    }
+    
     override func prepareForReuse() {
         super.prepareForReuse()
         abLabel.text = nil

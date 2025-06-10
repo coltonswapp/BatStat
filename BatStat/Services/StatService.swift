@@ -154,4 +154,14 @@ class StatService {
         let stats = try await fetchPlayerGameStats(gameId: gameId, playerId: player.id)
         return calculatePlayerGameStats(player: player, stats: stats)
     }
+    
+    /// Fetch stats for a specific player across all games
+    func fetchPlayerStatsForGame(playerId: UUID, gameId: UUID) async throws -> [Stat] {
+        return try await fetchPlayerGameStats(gameId: gameId, playerId: playerId)
+    }
+    
+    /// Fetch all stats for a game (alias for backward compatibility)
+    func fetchStatsForGame(gameId: UUID) async throws -> [Stat] {
+        return try await fetchGameStats(gameId: gameId)
+    }
 }

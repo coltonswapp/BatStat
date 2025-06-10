@@ -83,6 +83,22 @@
     - display all of the at-bats
     - remove the cell to add another at bat because this game is presumably ended
 - Include spray chart from the game for the player
+
+## GameSummaryViewController
+- UICollectionView
+    - Section 1 "Game Info"
+        - display the opponent, date, score, win/loss
+    - Section 2 "Player Statistics"
+        - display the player statistics for the game, in the same manner that we display statistics on the @GameViewController
+    - Section 3 "Innings"
+        - display each inning that was recorded, along with the inning stats using the @InningTotalsCell (header of @InningStatsHeaderView)
+        - Tapping on the inning cell will take us to an @InningDetailViewController
+        
+## InningDetailViewController
+- This viewController will be setup almost the same way as the @PlayByPlayViewController
+- Display all the events that happened in the associated inning (only 1 inning)
+- Section 2 should be a spray chart of all the hits that were recorded that inning. 
+    
      
 
 ## Queries
