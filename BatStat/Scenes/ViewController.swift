@@ -33,6 +33,7 @@ class ViewController: UIViewController {
         
         setupUI()
         setupNavigationBar()
+        setupNotifications()
         loadGames()
     }
     
@@ -47,9 +48,10 @@ class ViewController: UIViewController {
                 Logger.debug("Loading games from GameService", category: .games)
                 let fetchedGames = try await gameService.fetchAllGames()
                 await MainActor.run {
+                    let previousCount = self.games.count
                     self.games = fetchedGames
                     self.collectionView.reloadData()
-                    Logger.info("Successfully loaded \(fetchedGames.count) games", category: .games)
+                    Logger.info("Successfully loaded \(fetchedGames.count) games (was \(previousCount))", category: .games)
                 }
             } catch {
                 await MainActor.run {
@@ -83,6 +85,35 @@ class ViewController: UIViewController {
             target: self,
             action: #selector(settingsTapped)
         )
+    }
+    
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(gameCreated),
+            name: NSNotification.Name("GameCreated"),
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(gameDeleted),
+            name: NSNotification.Name("GameDeleted"),
+            object: nil
+        )
+    }
+    
+    @objc private func gameCreated() {
+        Logger.debug("Received GameCreated notification, reloading games", category: .games)
+        loadGames()
+    }
+    
+    @objc private func gameDeleted() {
+        Logger.debug("Received GameDeleted notification, reloading games", category: .games)
+        loadGames()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -138,10 +169,10 @@ class ViewController: UIViewController {
         let editGameVC = EditGameViewController()
         let navController = UINavigationController(rootViewController: editGameVC)
         
-        // Add completion handler to reload games when EditGameViewController is dismissed
-        navController.presentationController?.delegate = self
-        
-        present(navController, animated: true)
+        present(navController, animated: true) {
+            // Set delegate after presentation to ensure it's properly set
+            navController.presentationController?.delegate = self
+        }
     }
     
     @objc func playersAndStatsTapped() {
@@ -254,9 +285,18 @@ extension ViewController: UICollectionViewDelegate {
             }
         case 1:
             let game = games[indexPath.item]
-            let gameVC = GameViewController()
-            gameVC.configure(with: game)
-            navigationController?.pushViewController(gameVC, animated: true)
+            
+            if game.isComplete {
+                // Show GameSummaryViewController for completed games
+                let gameSummaryVC = GameSummaryViewController()
+                gameSummaryVC.configure(with: game)
+                navigationController?.pushViewController(gameSummaryVC, animated: true)
+            } else {
+                // Show GameViewController for active games
+                let gameVC = GameViewController()
+                gameVC.configure(with: game)
+                navigationController?.pushViewController(gameVC, animated: true)
+            }
         default:
             break
         }
@@ -269,6 +309,7 @@ extension ViewController: UIAdaptivePresentationControllerDelegate {
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         // Reload games when EditGameViewController is dismissed
         Logger.debug("EditGameViewController dismissed, reloading games", category: .games)
+        Logger.debug("Current games count before reload: \(games.count)", category: .games)
         loadGames()
     }
 }

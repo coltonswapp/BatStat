@@ -1,5 +1,9 @@
 import UIKit
 
+protocol EditGameViewControllerProtocol: AnyObject {
+    func gameDeleted()
+}
+
 class EditGameViewController: UIViewController {
     
     private lazy var collectionView: UICollectionView = {
@@ -15,6 +19,7 @@ class EditGameViewController: UIViewController {
         collectionView.register(DatePickerCell.self, forCellWithReuseIdentifier: DatePickerCell.identifier)
         collectionView.register(PlayerRosterCell.self, forCellWithReuseIdentifier: PlayerRosterCell.identifier)
         collectionView.register(UICollectionViewListCell.self, forCellWithReuseIdentifier: "PlayerBankCell")
+        collectionView.register(UICollectionViewListCell.self, forCellWithReuseIdentifier: "ActionButtonCell")
         collectionView.register(SectionHeaderView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: SectionHeaderView.identifier)
         
         // Enable drag and drop for reordering
@@ -30,11 +35,15 @@ class EditGameViewController: UIViewController {
     private var currentGame: Game?
     private var teamName: String = ""
     private var gameDate: Date = Date()
+    private var homeScore: Int = 0
+    private var opponentScore: Int = 0
     private var allPlayers: [Player] = []
     private var rosterPlayers: [Player] = []
     private var availablePlayers: [Player] = []
     private var isNewGame: Bool = true
     private let maxRosterSize = 10
+    
+    weak var delegate: EditGameViewControllerProtocol?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -49,6 +58,10 @@ class EditGameViewController: UIViewController {
         loadData()
     }
     
+    private var isGameComplete: Bool {
+        return currentGame?.isComplete ?? false
+    }
+    
     private func loadData() {
         loadPlayers()
         
@@ -56,11 +69,15 @@ class EditGameViewController: UIViewController {
             // Editing existing game
             teamName = game.opponent
             gameDate = game.date
+            homeScore = game.homeScore ?? 0
+            opponentScore = game.opponentScore ?? 0
             loadGameRoster(gameId: game.id)
         } else {
             // Creating new game - start with empty roster
             teamName = ""
             gameDate = Date()
+            homeScore = 0
+            opponentScore = 0
             rosterPlayers = []
             updateAvailablePlayers()
         }
@@ -118,19 +135,28 @@ class EditGameViewController: UIViewController {
     }
     
     private func setupNavigationBar() {
-        title = isNewGame ? "New Game" : "Edit Game"
-        
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .cancel,
-            target: self,
-            action: #selector(cancelTapped)
-        )
-        
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .save,
-            target: self,
-            action: #selector(saveTapped)
-        )
+        if isGameComplete {
+            title = "Game Complete"
+            title = "Game Complete"
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                barButtonSystemItem: .done,
+                target: self,
+                action: #selector(cancelTapped)
+            )
+            navigationItem.rightBarButtonItem = nil
+        } else {
+            title = isNewGame ? "New Game" : "Edit Game"
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                barButtonSystemItem: .cancel,
+                target: self,
+                action: #selector(cancelTapped)
+            )
+            navigationItem.rightBarButtonItem = UIBarButtonItem(
+                barButtonSystemItem: .save,
+                target: self,
+                action: #selector(saveTapped)
+            )
+        }
     }
     
     private func createLayout() -> UICollectionViewLayout {
@@ -142,6 +168,8 @@ class EditGameViewController: UIViewController {
                 return self.createRosterSection(environment: environment)
             case 2:
                 return self.createPlayerBankSection(environment: environment)
+            case 3:
+                return self.createDeleteSection(environment: environment)
             default:
                 return self.createGameDetailsSection(environment: environment)
             }
@@ -159,6 +187,11 @@ class EditGameViewController: UIViewController {
     private func createRosterSection(environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
         var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         configuration.trailingSwipeActionsConfigurationProvider = { [weak self] indexPath in
+            // Disable swipe actions if game is complete
+            guard !(self?.isGameComplete ?? true) else {
+                return nil
+            }
+            
             let deleteAction = UIContextualAction(style: .destructive, title: "Remove") { _, _, completion in
                 self?.removePlayerFromRoster(at: indexPath.item)
                 completion(true)
@@ -187,6 +220,14 @@ class EditGameViewController: UIViewController {
         let headerSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .absolute(44))
         let header = NSCollectionLayoutBoundarySupplementaryItem(layoutSize: headerSize, elementKind: UICollectionView.elementKindSectionHeader, alignment: .top)
         section.boundarySupplementaryItems = [header]
+        
+        return section
+    }
+    
+    private func createDeleteSection(environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection {
+        let configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+        section.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 20, trailing: 14)
         
         return section
     }
@@ -233,6 +274,8 @@ class EditGameViewController: UIViewController {
                 
                 await MainActor.run {
                     Logger.info("Successfully created game with \(self.rosterPlayers.count) players", category: .games)
+                    // Notify the presenting view controller to reload
+                    NotificationCenter.default.post(name: NSNotification.Name("GameCreated"), object: nil)
                     self.dismiss(animated: true)
                 }
             } catch {
@@ -245,9 +288,103 @@ class EditGameViewController: UIViewController {
     }
     
     private func updateExistingGame() {
-        // TODO: Implement game update functionality
-        Logger.info("Updating existing game functionality not yet implemented", category: .games)
-        dismiss(animated: true)
+        guard let gameId = currentGame?.id else { return }
+        
+        Task {
+            do {
+                Logger.info("Updating existing game: \(teamName)", category: .games)
+                
+                // Update basic game info
+                var updatedGame = currentGame!
+                updatedGame.opponent = teamName
+                updatedGame.date = gameDate
+                updatedGame.homeScore = homeScore
+                updatedGame.opponentScore = opponentScore
+                
+                let result = try await gameService.updateGame(updatedGame)
+                
+                await MainActor.run {
+                    Logger.info("Successfully updated game", category: .games)
+                    self.dismiss(animated: true)
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to update game: \(error.localizedDescription)", category: .games)
+                    self.showAlert(title: "Error", message: "Failed to update game: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    private func markGameAsComplete() {
+        guard let gameId = currentGame?.id else { return }
+        
+        Task {
+            do {
+                Logger.info("Marking game as complete with scores - Home: \(homeScore), Opponent: \(opponentScore)", category: .games)
+                
+                // Update scores first
+                let gameWithScores = try await gameService.updateGameScore(gameId: gameId, homeScore: homeScore, opponentScore: opponentScore)
+                
+                // Then mark as complete
+                let completedGame = try await gameService.markGameAsFinished(gameId: gameId)
+                
+                await MainActor.run {
+                    self.currentGame = completedGame
+                    Logger.info("Successfully marked game as complete", category: .games)
+                    self.setupNavigationBar() // Update navigation bar
+                    self.collectionView.reloadData() // Refresh UI
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to mark game as complete: \(error.localizedDescription)", category: .games)
+                    self.showAlert(title: "Error", message: "Failed to mark game as complete: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    private func confirmDeleteGame() {
+        guard let game = currentGame else { return }
+        
+        let alert = UIAlertController(
+            title: "Delete Game",
+            message: "Are you sure you want to delete this game against \(game.opponent)? This will permanently delete the game and all associated stats. This action cannot be undone.",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
+            self.deleteGame()
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func deleteGame() {
+        guard let gameId = currentGame?.id else { return }
+        
+        Task {
+            do {
+                Logger.info("Deleting game: \(currentGame?.opponent ?? "Unknown")", category: .games)
+                
+                try await gameService.deleteGame(id: gameId)
+                
+                await MainActor.run {
+                    Logger.info("Successfully deleted game", category: .games)
+                    // Notify the presenting view controller to reload
+                    NotificationCenter.default.post(name: NSNotification.Name("GameDeleted"), object: nil)
+                    self.dismiss(animated: true) {
+                        self.delegate?.gameDeleted()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to delete game: \(error.localizedDescription)", category: .games)
+                    self.showAlert(title: "Error", message: "Failed to delete game: \(error.localizedDescription)")
+                }
+            }
+        }
     }
     
     private func showAlert(title: String, message: String) {
@@ -290,17 +427,25 @@ class EditGameViewController: UIViewController {
 
 extension EditGameViewController: UICollectionViewDataSource {
     func numberOfSections(in collectionView: UICollectionView) -> Int {
-        return 3
+        return isNewGame ? 3 : 4 // Add delete section for existing games
     }
     
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         switch section {
         case 0:
-            return 2 // Team name and date picker (per tech specs)
+            if isNewGame {
+                return 2 // Team name and date picker for new games
+            } else if isGameComplete {
+                return 4 // Team name, date, home score, opponent score (read-only)
+            } else {
+                return 5 // Team name, date, home score, opponent score, complete button
+            }
         case 1:
             return rosterPlayers.count // Roster section (limited to 10)
         case 2:
             return availablePlayers.count // Player bank section
+        case 3:
+            return isNewGame ? 0 : 1 // Delete button section (only for existing games)
         default:
             return 0
         }
@@ -309,22 +454,58 @@ extension EditGameViewController: UICollectionViewDataSource {
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         switch indexPath.section {
         case 0:
-            if indexPath.item == 0 {
-                // Team name text field (as per tech specs)
+            switch indexPath.item {
+            case 0:
+                // Team name text field
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: TextFieldCell.identifier, for: indexPath) as! TextFieldCell
                 cell.configure(placeholder: "Team Name", text: teamName)
-                cell.onTextChanged = { [weak self] text in
-                    self?.teamName = text
+                if !isGameComplete {
+                    cell.onTextChanged = { [weak self] text in
+                        self?.teamName = text
+                    }
                 }
                 return cell
-            } else {
-                // Date picker (defaulted to today as per tech specs)
+            case 1:
+                // Date picker
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: DatePickerCell.identifier, for: indexPath) as! DatePickerCell
                 cell.configure(date: gameDate)
-                cell.onDateChanged = { [weak self] date in
-                    self?.gameDate = date
+                if !isGameComplete {
+                    cell.onDateChanged = { [weak self] date in
+                        self?.gameDate = date
+                    }
                 }
                 return cell
+            case 2:
+                // Home score (only shown for existing games)
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: TextFieldCell.identifier, for: indexPath) as! TextFieldCell
+                cell.configure(placeholder: "Home Score", text: "\(homeScore)")
+                if !isGameComplete {
+                    cell.onTextChanged = { [weak self] text in
+                        self?.homeScore = Int(text) ?? 0
+                    }
+                }
+                return cell
+            case 3:
+                // Opponent score (only shown for existing games)
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: TextFieldCell.identifier, for: indexPath) as! TextFieldCell
+                cell.configure(placeholder: "Opponent Score", text: "\(opponentScore)")
+                if !isGameComplete {
+                    cell.onTextChanged = { [weak self] text in
+                        self?.opponentScore = Int(text) ?? 0
+                    }
+                }
+                return cell
+            case 4:
+                // Complete game button (only shown for incomplete games)
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ActionButtonCell", for: indexPath) as! UICollectionViewListCell
+                var content = cell.defaultContentConfiguration()
+                content.text = "Mark Game Complete"
+                content.textProperties.color = .systemBlue
+                content.textProperties.alignment = .center
+                cell.contentConfiguration = content
+                return cell
+            default:
+                return UICollectionViewCell()
             }
             
         case 1:
@@ -345,6 +526,18 @@ extension EditGameViewController: UICollectionViewDataSource {
             }
             content.image = UIImage(systemName: "person.circle")
             content.imageProperties.tintColor = .systemGray2
+            cell.contentConfiguration = content
+            return cell
+            
+        case 3:
+            // Delete game button (only for existing games)
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ActionButtonCell", for: indexPath) as! UICollectionViewListCell
+            var content = cell.defaultContentConfiguration()
+            content.text = "Delete Game"
+            content.textProperties.color = .systemRed
+            content.textProperties.alignment = .center
+            content.image = UIImage(systemName: "trash")
+            content.imageProperties.tintColor = .systemRed
             cell.contentConfiguration = content
             return cell
             
@@ -389,6 +582,21 @@ extension EditGameViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         
+        // Handle complete game button tap
+        if indexPath.section == 0 && indexPath.item == 4 && !isGameComplete {
+            markGameAsComplete()
+            return
+        }
+        
+        // Handle delete game button tap
+        if indexPath.section == 3 && indexPath.item == 0 && !isNewGame {
+            confirmDeleteGame()
+            return
+        }
+        
+        // Prevent editing if game is complete
+        guard !isGameComplete else { return }
+        
         if indexPath.section == 2 {
             // Player bank section - add player to roster when tapped
             addPlayerToRosterFromBank(at: indexPath.item)
@@ -400,6 +608,8 @@ extension EditGameViewController: UICollectionViewDelegate {
 
 extension EditGameViewController: UICollectionViewDragDelegate {
     func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
+        // Prevent drag and drop if game is complete
+        guard !isGameComplete else { return [] }
         guard indexPath.section == 1 else { return [] }
         
         let player = rosterPlayers[indexPath.item]
@@ -414,6 +624,11 @@ extension EditGameViewController: UICollectionViewDragDelegate {
 
 extension EditGameViewController: UICollectionViewDropDelegate {
     func collectionView(_ collectionView: UICollectionView, dropSessionDidUpdate session: UIDropSession, withDestinationIndexPath destinationIndexPath: IndexPath?) -> UICollectionViewDropProposal {
+        // Prevent drop if game is complete
+        guard !isGameComplete else {
+            return UICollectionViewDropProposal(operation: .forbidden)
+        }
+        
         guard let destinationIndexPath = destinationIndexPath,
               destinationIndexPath.section == 1,
               session.localDragSession != nil else {
